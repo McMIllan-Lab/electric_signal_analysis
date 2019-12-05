@@ -8,6 +8,11 @@
 
 library(tuneR)
 
+relufy<-function(invect,lowestNumber=0) { # Converts a vector into a rectified unit (i.e. converts all values below lowestNumber to lowestNumber - a classical rectifier changes all negative numbers to zero, for example).
+  outvect<-sapply(invect,max,lowestNumber)
+  return(outvect)
+}
+
 monofy<-function(inSignal) {
   outSound<-mono(inSignal,which="left")
   return(outSound)
@@ -66,22 +71,36 @@ identifyPeaks<-function(inSignal,type="high") {
     inSignal<-monofy(inSignal)
   }
 
+# BUG: For individuals with really funky signals (e.g. 8-005 from Rio Zegla) break the functioning of this section. It was a problem of properly identifying the lower peaks when there was fluctuation within the peak. Fixed just after the for loop below, with the highestLowest variable.
+  peakRegionsIndicesHigh<-which(inSignal@left > quantile(inSignal@left,c(.99)))
+  peakRegionsIndicesLow<-which(inSignal@left < quantile(inSignal@left,c(.01)))
+
+# BUG: If the chunk analyzed starts in the middle of a signal, it chooses a pulse as the low and then the high (including the silence in between). Possible solution: use only low-amplitude peaks that are in a higher index than the lowest-indexed high-amplitude peak, and use only high-amplitude peaks that are in a lower index than the highest-indexed low-amplitude peak. (## More or less fixed - see below ##).
+
+##### DOWN HERE ##### !!!!!    !!!!!!!!!    !!!!!!!!!!   !!!!!!!!!!!!!!!!
+
+# NEW PROBLEM: when a signal is not complete but both peaks are in there, it also makes a mistake. Find a way to remove any and all incomplete pulses at the extremities of the recording.
+  peakRegionsIndicesHigh<-subset(peakRegionsIndicesHigh, peakRegionsIndicesHigh < max(peakRegionsIndicesLow))
+  peakRegionsIndicesLow<-subset(peakRegionsIndicesLow, peakRegionsIndicesLow > min(peakRegionsIndicesHigh))
+
   if (type == "high") {
-    peakRegionsIndices<-which(inSignal@left > quantile(inSignal@left,c(.99)))
+    peakRegionsIndices<-peakRegionsIndicesHigh
   } else if (type == "low") {
-    peakRegionsIndices<-which(inSignal@left < quantile(inSignal@left,c(.01)))
+    peakRegionsIndices<-peakRegionsIndicesLow
   } else {
     paste("Type of peak",type,"unrecognized. Please input  \"high\" or \"low\"")
     return()
   }
 
   diffPeakRegionsIndices<-diff(peakRegionsIndices)
+#  lowestHighest<-min(diffPeakRegionsIndices[diffPeakRegionsIndices > mean(diffPeakRegionsIndices)])
+  highestLowest<-max(diffPeakRegionsIndices[diffPeakRegionsIndices < mean(diffPeakRegionsIndices)])
   stepVect<-c(peakRegionsIndices[1])
   resultsDF<-data.frame(peakIndex=NA,value=NA)
   inRowNum<-1
 
   for (i in 1:length(diffPeakRegionsIndices)) {
-    if (diffPeakRegionsIndices[i] == 1) {
+    if (diffPeakRegionsIndices[i] <= highestLowest) {
       stepVect<-c(stepVect,peakRegionsIndices[i+1])
     } else {
       stepMaxIndex<-stepVect[which.max(inSignal@left[stepVect])]
@@ -109,6 +128,7 @@ peakStepsInSeconds<-function(inSignal) {
 }
 
 extractSingleWaveform<-function(inSignal,waveformNumber=1) {
+  inSignal<-monofy(inSignal)
   highPeaksDF<-identifyPeaks(inSignal,type="high")
   lowPeaksDF<-identifyPeaks(inSignal,type="low")
   waveformHighPeak<-highPeaksDF[waveformNumber,]
@@ -126,77 +146,12 @@ extractSingleWaveform<-function(inSignal,waveformNumber=1) {
 }
 
 
-signalSummaryTable<-function(inSignal,howMany="ALL") {
-  if (inSignal@stereo == TRUE) {
-    print("Input signal is stereo. Converting to mono.")
-    inSignal<-monofy(inSignal)
-  }
-
-  highPeaks<-identifyPeaks(inSignal,"high")
-  lowPeaks<-identifyPeaks(inSignal,"low")
-  if (length(highPeaks) != length(lowPeaks)) {
-    print("Number of high vs low peaks does not match, this may bring troubles later. Please align sample better.")
-    return
-  }
-
-  if (howMany == "ALL") {
-    print("Sampling all waveforms in recorded signal")
-    peakNumbers<-c(1:length(highPeaks$peakIndex))
-  } else if (is.numeric(howMany)) {
-    howMany<-min(round(howMany),length(highPeaks$peakIndex))
-    print(paste("Sampling",howMany,"random waveforms."))
-    randVector<-sample.int(length(highPeaks$peakIndex),howMany)
-    randVector<-randVector[order(randVector)]
-    highPeaks<-highPeaks[randVector,]
-    lowPeaks<-lowPeaks[randVector,]
-    peakNumbers<-randVector
-  } else {
-    print(paste("Your input for 'howMany',",howMany,"was not understood"))
-  }
-
-  resultsDF<-data.frame(Peak.Number=peakNumbers,Lower.Bound.Index=NA,P1.Index=highPeaks$peakIndex,Intercept.Index=NA,P2.Index=lowPeaks$peakIndex,Upper.Bound.Index=NA,P1.Value=highPeaks$value,P2.Value=lowPeaks$value,P1.P2.Ratio=NA,Time.To.P1=NA,Time.To.Switch=NA,Time.To.Repolarize=NA)
-  resultsDF$P1.P2.Ratio<-abs(resultsDF$P1.Value/resultsDF$P2.Value)
-
-  interceptsVect<-c()
-  lowerBoundsVect<-c()
-  upperBoundsVect<-c()
-  inputIndex<-1
-  for (i in 1:length(rownames(resultsDF))) { # CAUTION: This section will produce incorrect results if signal is inverted. Avoid this by always using the channel that records the first peak as positive.
-print(paste("Summarizing peak",i))
-    waveformNum<-i
-    waveform<-extractSingleWaveform(inSignal,i)
-    highPeak<-resultsDF$P1.Index[i]
-    lowPeak<-resultsDF$P2.Index[i]
-    indexVector<-c(highPeak:lowPeak)
-    interceptIndex<-indexVector[which.min(abs(inSignal@left[highPeak:lowPeak]))]
-    interceptsVect[i]<-interceptIndex
-
-    bounds<-findBounds(waveform)
-#print(bounds)
-    lowerBound<-highPeak-bounds[1]
-    upperBound<-lowPeak+bounds[2]
-    lowerBoundsVect[i]<-lowerBound
-    upperBoundsVect[i]<-upperBound
-  }
-
-  resultsDF$Intercept.Index<-interceptsVect
-  resultsDF$Lower.Bound.Index<-lowerBoundsVect
-  resultsDF$Upper.Bound.Index<-upperBoundsVect
-  resultsDF$Time.To.P1<-samplesToSeconds(resultsDF$P1.Index-resultsDF$Lower.Bound.Index,inSignal@samp.rate)
-  resultsDF$Time.To.Switch<-samplesToSeconds(resultsDF$P2.Index-resultsDF$P1.Index,inSignal@samp.rate)
-  resultsDF$Time.To.Repolarize<-samplesToSeconds(resultsDF$Upper.Bound.Index-resultsDF$P2.Index,inSignal@samp.rate)
-
-#  resultsDF[(length(rownames(resultsDF))+1),]<-colMeans(resultsDF)
-
-  return(resultsDF)
-}
-
-
 identifyLowerBound<-function(waveform,windowSize=10,stepSize=10) {
   lowestPeak<-min(which.max(waveform@left),which.min(waveform@left))
+plot(waveform)
   lowerBoundWindowStart<-lowestPeak-windowSize
   lowerBoundWindowEnd<-lowestPeak
-
+print(paste("Window Start:",lowerBoundWindowStart,"window ends:",lowerBoundWindowEnd))
   testAgain=TRUE
   while (testAgain) {
 #print("Entered while loop")
@@ -206,7 +161,7 @@ identifyLowerBound<-function(waveform,windowSize=10,stepSize=10) {
 #print(paste("Window Bounds:",lowerBoundWindowStart,lowerBoundWindowEnd))
 #print(windowVals)
     timeVect<-c(1:length(windowVals))
-    correlation<-cor.test(windowVals,timeVect,method="spearman")
+    correlation<-cor.test(windowVals,timeVect,method="spearman")	
     if (correlation$p.value > 0.05) {
 #print("Entered SECOND if statement")
       lowerBound<-round(abs(lowerBoundWindowStart+lowerBoundWindowEnd)/2)
@@ -280,6 +235,100 @@ findBounds<-function(waveform) { # NOTE: must contain a single waveform
 }
 
 
+signalSummaryTable<-function(inSignal,howMany="ALL") {
+  if (inSignal@stereo == TRUE) {
+    print("Input signal is stereo. Converting to mono.")
+    inSignal<-monofy(inSignal)
+  }
+
+  highPeaks<-identifyPeaks(inSignal,"high")
+  lowPeaks<-identifyPeaks(inSignal,"low")
+  if (length(highPeaks) != length(lowPeaks)) {
+    print("Number of high vs low peaks does not match, this may bring troubles later. Please align sample better.")
+    return
+  }
+
+  if (howMany == "ALL") {
+    print("Sampling all waveforms in recorded signal")
+    peakNumbers<-c(2:(length(highPeaks$peakIndex)-1)) # Excluding first and last waveform as they may be incomplete
+  } else if (is.numeric(howMany)) {
+    howMany<-min(round(howMany),length(highPeaks$peakIndex))
+    print(paste("Sampling",howMany,"random waveforms."))
+    randVector<-sample(2:(length(highPeaks$peakIndex)-1),howMany) # Excluding first and last waveform as they may be incomplete
+    randVector<-randVector[order(randVector)]
+    highPeaks<-highPeaks[randVector,]
+    lowPeaks<-lowPeaks[randVector,]
+    peakNumbers<-randVector
+  } else {
+    print(paste("Your input for 'howMany',",howMany,"was not understood"))
+  }
+
+  resultsDF<-data.frame(Peak.Number=peakNumbers,Lower.Bound.Index=NA,P1.Index=highPeaks$peakIndex,Intercept.Index=NA,P2.Index=lowPeaks$peakIndex,Upper.Bound.Index=NA,P1.Value=highPeaks$value,P2.Value=lowPeaks$value,P1.P2.Ratio=NA,Time.To.P1=NA,Time.To.Switch=NA,Time.To.Repolarize=NA,Decay.Lambda=NA)
+  resultsDF$P1.P2.Ratio<-abs(resultsDF$P1.Value/resultsDF$P2.Value)
+
+  interceptsVect<-c()
+  lowerBoundsVect<-c()
+  upperBoundsVect<-c()
+  lambdasVect<-c()
+  inputIndex<-1
+  for (i in 1:length(rownames(resultsDF))) { # CAUTION: This section will produce incorrect results if signal is inverted. Avoid this by always using the channel that records the first peak as positive.
+print(paste(i,": Summarizing peak",randVector[i]))
+    waveformNum<-i
+    waveform<-extractSingleWaveform(inSignal,i)
+    highPeak<-resultsDF$P1.Index[i]
+    lowPeak<-resultsDF$P2.Index[i]
+    indexVector<-c(highPeak:lowPeak)
+    interceptIndex<-indexVector[which.min(abs(inSignal@left[highPeak:lowPeak]))]
+    interceptsVect[i]<-interceptIndex
+
+    bounds<-findBounds(waveform)
+#print(bounds)
+    lowerBound<-highPeak-bounds[1]
+    upperBound<-lowPeak+bounds[2]
+    lowerBoundsVect[i]<-lowerBound
+    upperBoundsVect[i]<-upperBound
+
+    repolarizationSlice<-inSignal@left[lowPeak:upperBound] # Caution: this assumes the negative peak goes after the positive peak
+    repoSliceList<-list(sample=0:(length(repolarizationSlice)-1),value=repolarizationSlice)
+    fitModel<-nls(value ~ SSasymp(sample, Asym, R0, lrc), data=repoSliceList)
+    lambdasVect[i]<-exp(coef(fitModel)[["lrc"]])
+  }
+
+  resultsDF$Intercept.Index<-interceptsVect
+  resultsDF$Lower.Bound.Index<-lowerBoundsVect
+  resultsDF$Upper.Bound.Index<-upperBoundsVect
+  resultsDF$Time.To.P1<-samplesToSeconds(resultsDF$P1.Index-resultsDF$Lower.Bound.Index,inSignal@samp.rate)
+  resultsDF$Time.To.Switch<-samplesToSeconds(resultsDF$P2.Index-resultsDF$P1.Index,inSignal@samp.rate)
+  resultsDF$Time.To.Repolarize<-samplesToSeconds(resultsDF$Upper.Bound.Index-resultsDF$P2.Index,inSignal@samp.rate)
+  resultsDF$Decay.Lambda<-lambdasVect
+
+#  resultsDF[(length(rownames(resultsDF))+1),]<-colMeans(resultsDF)
+
+  return(resultsDF)
+}
+
+
+# The function that takes MP3 files with their collection data, already organized in a table (see Table_Brachys_singleGain.csv), and gives out the average values of the signalSummaryTable for each individual)
+totalStudyAnalysis<-function(inTable,pulsesPerIndiv=10) {
+  outDFMeans<-data.frame(ID=NA,Location=NA,P1.Value=NA, P2.Value=NA,P1.P2.Ratio=NA,Time.To.P1=NA,Time.To.Switch=NA,Time.To.Repolarize=NA,Decay.Lambda=NA,Num.Pulses=NA)
+#  outDFSds<-data.frame(ID=NA,Location=NA,P1.Value=NA, P2.Value=NA,P1.P2.Ratio=NA,Time.To.P1=NA,Time.To.Switch=NA,Time.To.Repolarize=NA,Decay.Lambda=NA)
+  for (i in 1:length(rownames(inTable))) {
+    fileName<-as.character(inTable[i,"Recording"])
+    gain<-inTable[i,"Gain"]
+    idNum<-as.character(inTable[i,"ID"])
+    location<-as.character(inTable[i,"Location"])
+    print(paste("Analyzing",fileName))
+
+    recording<-readMP3(fileName)
+    burntInSound<-burnTails(recording,1)
+    burntInSound@left<-burntInSound@left/gain
+    indivTable<-signalSummaryTable(burntInSound,pulsesPerIndiv)
+    outDFMeans[i,]<-c(idNum,location,colMeans(indivTable[,7:13]),pulsesPerIndiv)
+#    outDFSds[i,]<-c(idNum,location,colMeans(indivTable[,7:13]))
+  }
+
+  return(outDFMeans)
+}
 
 
 
