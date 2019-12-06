@@ -28,16 +28,47 @@ secondsToSamples<-function(numSeconds,samplingRate) {
   return(samples)
 }
 
+clipIncompleteWaves<-function(inSignal) {
+  signalSize<-length(inSignal@left)
+
+  maxPeaks<-which(inSignal@left > quantile(inSignal@left,c(0.99)))
+  minPeaks<-which(inSignal@left < quantile(inSignal@left,c(0.01)))
+
+  diffMaxPeaks<-diff(diffMaxPeaks)
+  avgStepSize<-round(mean(diffMaxPeaks[diffMaxPeaks > mean(diffMaxPeaks)]))
+  halfStep<-round(avgStepSize/2)
+  sizeMinusHalfStep<-signalSize-halfStep
+
+# A warning will pop up if the signal cut in the edge has only one of the peaks. Maybe fix one day.
+  if (any(maxPeaks > sizeMinusHalfStep) || any(minPeaks > sizeMinusHalfStep)) {
+    upperSignalBound<-min(min(maxPeaks[maxPeaks > sizeMinusHalfStep]), min(minPeaks[minPeaks > sizeMinusHalfStep]))
+    upperCutoff<-upperSignalBound - halfStep
+    inSignal<-inSignal[1:upperCutoff]
+  }
+
+  if (any(maxPeaks < halfStep) || any(minPeaks < halfStep)) {
+    lowerSignalBound<-max(max(maxPeaks[maxPeaks < halfStep]), max(minPeaks[minPeaks < halfStep]))
+    lowerCutoff<-lowerSignalBound + halfStep
+    inSignal<-inSignal[lowerCutoff:length(inSignal@left)]
+  }
+
+  return(inSignal)
+}
+
+
 burnTails<-function(inSignal,burnSeconds=1) {
-  print(paste("Burning",burnSeconds,"seconds from beginning and end of recording."))
+#  print(paste("Burning",burnSeconds,"seconds from beginning and end of recording."))
   if (inSignal@stereo) {
    print("Input in stereo converted to mono")
    inSignal<-monofy(inSignal)
   }
+
   samplesToBurn<-secondsToSamples(burnSeconds,samplingRate=inSignal@samp.rate)
   startSample<-samplesToBurn
   endSample<-length(inSignal)-samplesToBurn
-  return(inSignal[startSample:endSample])
+  inSignal<-inSignal[startSample:endSample]
+  inSignal<-clipIncompleteWaves(inSignal)
+  return(inSignal)
 }
 
 frequencyEstimate<-function(inSignal) {
