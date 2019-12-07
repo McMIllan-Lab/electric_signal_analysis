@@ -99,12 +99,9 @@ fourierTransfTable<-function(inSignal) {
   return(mainDF)
 }
 
-findCorrespLowPeak<-(inSignal,peakRegionsIndicesHigh) {
-  
-}
 
-# TO DO: 1) Make function spit out a data frame that shows index and value of both high and low peaks, 2) Detect low peaks by looking for the lowest amplitude in the samples after a detected high peak (here, 'after' means half a frequency step, as in the variable 'halfStep' below).
-#identifyPeaks<-function(inSignal,type="high") {
+# TO DO: 1) Make function spit out a data frame that shows index and value of both high and low peaks (remember to fix all functions that read the output of this function). 2) Detect low peaks by looking for the lowest amplitude in the samples after a detected high peak (here, 'after' means half a frequency step, as in the variable 'halfStep' below).
+identifyPeaks<-function(inSignal) {
   if (inSignal@stereo) {
     print("Input signal is stereo. Converting to mono.")
     inSignal<-monofy(inSignal)
@@ -115,40 +112,24 @@ findCorrespLowPeak<-(inSignal,peakRegionsIndicesHigh) {
   avgStepSize<-round(mean(diffMaxPeaks[diffMaxPeaks > mean(diffMaxPeaks)]))
   halfStep<-round(avgStepSize/2)
 
-  peakRegionsIndicesLow<-which(inSignal@left < (min(inSignal@left) * 0.8))
-
-  if (type == "high") {
-    peakRegionsIndices<-peakRegionsIndicesHigh
-  } else if (type == "low") {
-    peakRegionsIndices<-peakRegionsIndicesLow
-  } else {
-    paste("Type of peak",type,"unrecognized. Please input  \"high\" or \"low\"")
-    return()
-  }
-
-  diffPeakRegionsIndices<-diff(peakRegionsIndices)
-#  lowestHighest<-min(diffPeakRegionsIndices[diffPeakRegionsIndices > mean(diffPeakRegionsIndices)])
-  highestLowest<-max(diffPeakRegionsIndices[diffPeakRegionsIndices < mean(diffPeakRegionsIndices)])
-  stepVect<-c(peakRegionsIndices[1])
-  resultsDF<-data.frame(peakIndex=NA,value=NA)
+  highestLowest<-max(diffMaxPeaks[diffMaxPeaks < mean(diffMaxPeaks)])
+  stepVect<-c(peakRegionsIndicesHigh[1])
+  resultsDF<-data.frame(High.Peak.Index=NA,High.Peak.Value=NA,Low.Peak.Index=NA,Low.Peak.Value=NA)
   inRowNum<-1
 
-  for (i in 1:length(diffPeakRegionsIndices)) {
-    if (diffPeakRegionsIndices[i] <= highestLowest) {
-      stepVect<-c(stepVect,peakRegionsIndices[i+1])
+  for (i in 1:length(diffMaxPeaks)) {
+    if (diffMaxPeaks[i] <= highestLowest) {
+      stepVect<-c(stepVect,peakRegionsIndicesHigh[i+1])
     } else {
       stepMaxIndex<-stepVect[which.max(inSignal@left[stepVect])]
       stepMaxValue<-max(inSignal@left[stepVect])
-      stepMinIndex<-stepVect[which.min(inSignal@left[stepVect])]
-      stepMinValue<-min(inSignal@left[stepVect])
 
-      if (type == "high") {
-        resultsDF[inRowNum,]<-c(stepMaxIndex,stepMaxValue)
-      } else if (type == "low") {
-        resultsDF[inRowNum,]<-c(stepMinIndex,stepMinValue)
-      }
+      stepMinIndex<-(stepMaxIndex-1) + (which.min(inSignal@left[stepMaxIndex:(stepMaxIndex + halfStep)]))
+      stepMinValue<-inSignal@left[stepMinIndex]
+
+      resultsDF[inRowNum,]<-c(stepMaxIndex,stepMaxValue,stepMinIndex,stepMinValue)
       inRowNum<-inRowNum+1
-      stepVect<-c(peakRegionsIndices[i+1])
+      stepVect<-c(peakRegionsIndicesHigh[i+1])
     }
   }
   return(resultsDF)
