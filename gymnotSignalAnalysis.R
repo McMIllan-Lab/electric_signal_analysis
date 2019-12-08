@@ -162,6 +162,7 @@ identifyLowerBound<-function(waveform,windowSize=10,stepSize=10) {
   testAgain=TRUE
   while (testAgain) {
 #print("Entered while loop")
+#    windowVals<-tryCatch(waveform@left[lowerBoundWindowStart:lowerBoundWindowEnd], error=function(e) { return(NA) })
     windowVals<-waveform@left[lowerBoundWindowStart:lowerBoundWindowEnd]
     minVal<-min(windowVals)
     maxVal<-max(windowVals)
@@ -217,7 +218,7 @@ findBounds<-function(waveform,title="No Title") { # NOTE: must contain a single 
   minValIndex<-which.min(waveform@left)
   minMaxInterval<-abs(maxValIndex-minValIndex)
 
-  pdf(paste(title,".pdf",sep=""))
+  #pdf(paste(title,".pdf",sep=""))
   plot(waveform,main=title,xlab="Time (s)", ylab="Amplitude")
   abline(h=0,col="red")
 
@@ -250,7 +251,7 @@ findBounds<-function(waveform,title="No Title") { # NOTE: must contain a single 
 
   abline(v=samplesToSeconds(upperBound,waveform@samp.rate),col="green")
   points(samplesToSeconds(upperPeak,waveform@samp.rate),upperPeakVal,pch=23,col="blue")
-  dev.off()
+#  dev.off()
 #  return(c(lowerBound,upperBound))
   return(c(distFromLowerPeak,distFromUpperPeak))
 }
@@ -289,6 +290,9 @@ signalSummaryTable<-function(inSignal,howMany="ALL",location="Undetermined",indi
   lambdasVect<-c()
   inputIndex<-1
 
+  pdffilename<-paste(location,"_",individual,"_G",gain,".pdf",sep="")
+  pdf(pdffilename)
+
   for (i in 1:nrow(resultsDF)) { # CAUTION: This section will produce incorrect results if signal is inverted. Avoid this by always using the channel that records the first peak as positive.
     waveformNum<-resultsDF$Peak.Number[i]
     identifier<-paste(location,"_",individual,"_","gain-",gain,"_","pulse-",waveformNum,"_",i,"-",nrow(resultsDF),sep="")
@@ -320,6 +324,8 @@ signalSummaryTable<-function(inSignal,howMany="ALL",location="Undetermined",indi
       lambdasVect[i]<-exp(coef(fitModel)[["lrc"]])
     }
   }
+
+  dev.off()
 
   resultsDF$Intercept.Index<-interceptsVect
   resultsDF$Lower.Bound.Index<-lowerBoundsVect
