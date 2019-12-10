@@ -6,7 +6,7 @@ A collection of scripts that analyze recordings of electrical signals from elect
 The signal is taken with an electrode, amplified, and recorded in a portable MP3 recorder.
 
 ## gymnotSignalAnalysis.R
-This is a collection of functions in R built to automatically analyze sound recordings of the electric signal of the pulse-type electric fish Brachyhypopomus. It requires the R package tuneR (by Uwe Ligges) to read in sound recordings.
+This is a collection of functions in R built to automatically analyze sound recordings of the electric signal of the pulse-type electric fish <i>Brachyhypopomus</i>. It requires the R package tuneR (by Uwe Ligges) to read in sound recordings.
 
 ### Function breakdown: identifyPeaks()
 This function takes in a sound recording and identifies all the pulses in it, and tabulates their location (in samples) and amplitude (for both the high amplitude peak and the negative amplitude peak).
